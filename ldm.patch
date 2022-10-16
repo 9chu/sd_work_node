@@ -1,0 +1,224 @@
+diff --git a/ldm/models/diffusion/ddim.py b/ldm/models/diffusion/ddim.py
+index fb31215..443cb90 100644
+--- a/ldm/models/diffusion/ddim.py
++++ b/ldm/models/diffusion/ddim.py
+@@ -7,6 +7,7 @@ from functools import partial
+ 
+ from ldm.modules.diffusionmodules.util import make_ddim_sampling_parameters, make_ddim_timesteps, noise_like, \
+     extract_into_tensor
++from ldm.util import select_best_device
+ 
+ 
+ class DDIMSampler(object):
+@@ -15,11 +16,12 @@ class DDIMSampler(object):
+         self.model = model
+         self.ddpm_num_timesteps = model.num_timesteps
+         self.schedule = schedule
++        self.device = select_best_device()
+ 
+     def register_buffer(self, name, attr):
+         if type(attr) == torch.Tensor:
+-            if attr.device != torch.device("cuda"):
+-                attr = attr.to(torch.device("cuda"))
++            if attr.device != self.device:
++                attr = attr.to(self.device)
+         setattr(self, name, attr)
+ 
+     def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True):
+@@ -44,14 +46,24 @@ class DDIMSampler(object):
+         ddim_sigmas, ddim_alphas, ddim_alphas_prev = make_ddim_sampling_parameters(alphacums=alphas_cumprod.cpu(),
+                                                                                    ddim_timesteps=self.ddim_timesteps,
+                                                                                    eta=ddim_eta,verbose=verbose)
+-        self.register_buffer('ddim_sigmas', ddim_sigmas)
+-        self.register_buffer('ddim_alphas', ddim_alphas)
++        if self.device == torch.device("mps"):
++            self.register_buffer('ddim_sigmas', to_torch(ddim_sigmas))
++            self.register_buffer('ddim_alphas', to_torch(ddim_alphas))
++        else:
++            self.register_buffer('ddim_sigmas', ddim_sigmas)
++            self.register_buffer('ddim_alphas', ddim_alphas)
+         self.register_buffer('ddim_alphas_prev', ddim_alphas_prev)
+-        self.register_buffer('ddim_sqrt_one_minus_alphas', np.sqrt(1. - ddim_alphas))
++        if self.device == torch.device("mps"):
++            self.register_buffer('ddim_sqrt_one_minus_alphas', to_torch(np.sqrt(1. - ddim_alphas)))
++        else:
++            self.register_buffer('ddim_sqrt_one_minus_alphas', np.sqrt(1. - ddim_alphas))
+         sigmas_for_original_sampling_steps = ddim_eta * torch.sqrt(
+             (1 - self.alphas_cumprod_prev) / (1 - self.alphas_cumprod) * (
+                         1 - self.alphas_cumprod / self.alphas_cumprod_prev))
+-        self.register_buffer('ddim_sigmas_for_original_num_steps', sigmas_for_original_sampling_steps)
++        if self.device == torch.device("mps"):
++            self.register_buffer('ddim_sigmas_for_original_num_steps', to_torch(sigmas_for_original_sampling_steps))
++        else:
++            self.register_buffer('ddim_sigmas_for_original_num_steps', sigmas_for_original_sampling_steps)
+ 
+     @torch.no_grad()
+     def sample(self,
+diff --git a/ldm/models/diffusion/ddpm.py b/ldm/models/diffusion/ddpm.py
+index bbedd04..6f5db19 100644
+--- a/ldm/models/diffusion/ddpm.py
++++ b/ldm/models/diffusion/ddpm.py
+@@ -24,6 +24,7 @@ from ldm.modules.distributions.distributions import normal_kl, DiagonalGaussianD
+ from ldm.models.autoencoder import VQModelInterface, IdentityFirstStage, AutoencoderKL
+ from ldm.modules.diffusionmodules.util import make_beta_schedule, extract_into_tensor, noise_like
+ from ldm.models.diffusion.ddim import DDIMSampler
++from ldm.util import select_best_device
+ 
+ 
+ __conditioning_keys__ = {'concat': 'c_concat',
+@@ -108,11 +109,11 @@ class DDPM(pl.LightningModule):
+ 
+         self.loss_type = loss_type
+ 
++        #self.device = select_best_device()
+         self.learn_logvar = learn_logvar
+-        self.logvar = torch.full(fill_value=logvar_init, size=(self.num_timesteps,))
++        self.logvar = torch.full(fill_value=logvar_init, size=(self.num_timesteps,), device=self.device)
+         if self.learn_logvar:
+-            self.logvar = nn.Parameter(self.logvar, requires_grad=True)
+-
++            self.logvar = nn.Parameter(self.logvar, requires_grad=True, device=self.device)
+ 
+     def register_schedule(self, given_betas=None, beta_schedule="linear", timesteps=1000,
+                           linear_start=1e-4, linear_end=2e-2, cosine_s=8e-3):
+diff --git a/ldm/models/diffusion/plms.py b/ldm/models/diffusion/plms.py
+index 78eeb10..a6a6fe9 100644
+--- a/ldm/models/diffusion/plms.py
++++ b/ldm/models/diffusion/plms.py
+@@ -6,6 +6,7 @@ from tqdm import tqdm
+ from functools import partial
+ 
+ from ldm.modules.diffusionmodules.util import make_ddim_sampling_parameters, make_ddim_timesteps, noise_like
++from ldm.util import select_best_device
+ 
+ 
+ class PLMSSampler(object):
+@@ -14,11 +15,12 @@ class PLMSSampler(object):
+         self.model = model
+         self.ddpm_num_timesteps = model.num_timesteps
+         self.schedule = schedule
++        self.device = select_best_device()
+ 
+     def register_buffer(self, name, attr):
+         if type(attr) == torch.Tensor:
+-            if attr.device != torch.device("cuda"):
+-                attr = attr.to(torch.device("cuda"))
++            if attr.device != self.device:
++                attr = attr.to(self.device)
+         setattr(self, name, attr)
+ 
+     def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True):
+@@ -45,14 +47,24 @@ class PLMSSampler(object):
+         ddim_sigmas, ddim_alphas, ddim_alphas_prev = make_ddim_sampling_parameters(alphacums=alphas_cumprod.cpu(),
+                                                                                    ddim_timesteps=self.ddim_timesteps,
+                                                                                    eta=ddim_eta,verbose=verbose)
+-        self.register_buffer('ddim_sigmas', ddim_sigmas)
+-        self.register_buffer('ddim_alphas', ddim_alphas)
++        if self.device == torch.device('mps'):
++            self.register_buffer('ddim_sigmas', to_torch(ddim_sigmas))
++            self.register_buffer('ddim_alphas', to_torch(ddim_alphas))
++        else:
++            self.register_buffer('ddim_sigmas', ddim_sigmas)
++            self.register_buffer('ddim_alphas', ddim_alphas)
+         self.register_buffer('ddim_alphas_prev', ddim_alphas_prev)
+-        self.register_buffer('ddim_sqrt_one_minus_alphas', np.sqrt(1. - ddim_alphas))
++        if self.device == torch.device('mps'):
++            self.register_buffer('ddim_sqrt_one_minus_alphas', to_torch(np.sqrt(1. - ddim_alphas)))
++        else:
++            self.register_buffer('ddim_sqrt_one_minus_alphas', np.sqrt(1. - ddim_alphas))
+         sigmas_for_original_sampling_steps = ddim_eta * torch.sqrt(
+             (1 - self.alphas_cumprod_prev) / (1 - self.alphas_cumprod) * (
+                         1 - self.alphas_cumprod / self.alphas_cumprod_prev))
+-        self.register_buffer('ddim_sigmas_for_original_num_steps', sigmas_for_original_sampling_steps)
++        if self.device == torch.device('mps'):
++            self.register_buffer('ddim_sigmas_for_original_num_steps', to_torch(sigmas_for_original_sampling_steps))
++        else:
++            self.register_buffer('ddim_sigmas_for_original_num_steps', sigmas_for_original_sampling_steps)
+ 
+     @torch.no_grad()
+     def sample(self,
+diff --git a/ldm/modules/encoders/modules.py b/ldm/modules/encoders/modules.py
+index ededbe4..5cd2c8e 100644
+--- a/ldm/modules/encoders/modules.py
++++ b/ldm/modules/encoders/modules.py
+@@ -7,6 +7,7 @@ from transformers import CLIPTokenizer, CLIPTextModel
+ import kornia
+ 
+ from ldm.modules.x_transformer import Encoder, TransformerWrapper  # TODO: can we directly rely on lucidrains code and simply add this as a reuirement? --> test
++from ldm.util import select_best_device
+ 
+ 
+ class AbstractEncoder(nn.Module):
+@@ -35,7 +36,7 @@ class ClassEmbedder(nn.Module):
+ 
+ class TransformerEmbedder(AbstractEncoder):
+     """Some transformer encoder layers"""
+-    def __init__(self, n_embed, n_layer, vocab_size, max_seq_len=77, device="cuda"):
++    def __init__(self, n_embed, n_layer, vocab_size, max_seq_len=77, device=select_best_device()):
+         super().__init__()
+         self.device = device
+         self.transformer = TransformerWrapper(num_tokens=vocab_size, max_seq_len=max_seq_len,
+@@ -52,7 +53,7 @@ class TransformerEmbedder(AbstractEncoder):
+ 
+ class BERTTokenizer(AbstractEncoder):
+     """ Uses a pretrained BERT tokenizer by huggingface. Vocab size: 30522 (?)"""
+-    def __init__(self, device="cuda", vq_interface=True, max_length=77):
++    def __init__(self, device=select_best_device(), vq_interface=True, max_length=77):
+         super().__init__()
+         from transformers import BertTokenizerFast  # TODO: add to reuquirements
+         self.tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+@@ -80,7 +81,7 @@ class BERTTokenizer(AbstractEncoder):
+ class BERTEmbedder(AbstractEncoder):
+     """Uses the BERT tokenizr model and add some transformer encoder layers"""
+     def __init__(self, n_embed, n_layer, vocab_size=30522, max_seq_len=77,
+-                 device="cuda",use_tokenizer=True, embedding_dropout=0.0):
++                 device=select_best_device(),use_tokenizer=True, embedding_dropout=0.0):
+         super().__init__()
+         self.use_tknz_fn = use_tokenizer
+         if self.use_tknz_fn:
+@@ -136,7 +137,7 @@ class SpatialRescaler(nn.Module):
+ 
+ class FrozenCLIPEmbedder(AbstractEncoder):
+     """Uses the CLIP transformer encoder for text (from Hugging Face)"""
+-    def __init__(self, version="openai/clip-vit-large-patch14", device="cuda", max_length=77):
++    def __init__(self, version="openai/clip-vit-large-patch14", device=select_best_device(), max_length=77):
+         super().__init__()
+         self.tokenizer = CLIPTokenizer.from_pretrained(version)
+         self.transformer = CLIPTextModel.from_pretrained(version)
+@@ -166,7 +167,7 @@ class FrozenCLIPTextEmbedder(nn.Module):
+     """
+     Uses the CLIP transformer encoder for text.
+     """
+-    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True):
++    def __init__(self, version='ViT-L/14', device=select_best_device(), max_length=77, n_repeat=1, normalize=True):
+         super().__init__()
+         self.model, _ = clip.load(version, jit=False, device="cpu")
+         self.device = device
+@@ -202,7 +203,7 @@ class FrozenClipImageEmbedder(nn.Module):
+             self,
+             model,
+             jit=False,
+-            device='cuda' if torch.cuda.is_available() else 'cpu',
++            device=select_best_device(),
+             antialias=False,
+         ):
+         super().__init__()
+diff --git a/ldm/util.py b/ldm/util.py
+index 8ba3885..a7e3aa9 100644
+--- a/ldm/util.py
++++ b/ldm/util.py
+@@ -201,3 +201,14 @@ def parallel_data_prefetch(
+         return out
+     else:
+         return gather_res
++
++
++def select_best_device():
++    # support M1 chips
++    desired_device = torch.device("cpu")
++    has_mps = getattr(torch, "has_mps", False)
++    if torch.cuda.is_available():
++        desired_device = torch.device("cuda")
++    elif has_mps:
++        desired_device = torch.device("mps")
++    return desired_device

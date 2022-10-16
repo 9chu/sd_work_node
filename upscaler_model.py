@@ -28,7 +28,7 @@ class UpscalerModel:
         self._scale = scale
         dest_w = img.width * scale
         dest_h = img.height * scale
-        while True:
+        for i in range(0, 3):  # 最多缩放 3 次
             if img.width >= dest_w and img.height >= dest_h:
                 break
             img = self._upscale(img)
