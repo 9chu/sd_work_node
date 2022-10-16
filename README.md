@@ -1,0 +1,68 @@
+# sd_work_node
+
+`Stable diffusion`模型计算节点。
+
+提供下述功能：
+- Tex2Img（仅 DDIM 采样器）
+- Img2Img（仅全图）
+- Upscale（仅 ESRGan）
+
+'''mermaid
+graph
+    A[sd_work_manager] --> B[sd_work_node]
+    A[sd_work_manager] --> C[sd_work_node]
+    A[sd_work_manager] --> D[sd_work_node]
+'''
+
+基于`Work-stealing`模式设计，可以多点部署，需要与`sd_work_manager`交互，对外功能由`sd_work_manager`提供。
+
+## 运行环境
+
+- Python >= 3.9
+- CUDA / MPS (Apple M1芯片)
+
+## 启动
+
+```bash
+python3 ./main.py --config config.json --verbose
+```
+
+### 参考配置文件
+
+- config.json
+
+```json
+{
+  "device": {
+    "half_precision": false,
+    "memory_level": 0
+  },
+  "model": {
+    "model_config_path": "./data/config.yaml",
+    "model_check_point_path": "./data/model.ckpt",
+    "model_vae_path": "./data/model.vae.pt"
+  },
+  "manager_url": "http://localhost:17059",
+  "hypernetwork_dir": "./data/modules",
+  "secret": ""
+}
+```
+
+| 配置项 | 说明                                                                             |
+| ----- |--------------------------------------------------------------------------------|
+| device.half_precision | 指定是否使用半精度（float16），适用于显存不足的环境。                                                 |
+| device.memory_level | 显存级别（0：高显存，不启用任何显存优化，速度最快；1：中显存，适用于不超过 6GB 的显卡，启用少量优化以减少显存占用；2：低显存，适用于 4GB 设备） |
+| model.model_config.path | 模型配置文件路径                                                                       |
+| model.model_check_point_path | 模型 Checkpoint 文件路径                                                             |
+| model.model_vae_path | （可选）VAE 文件路径                                                                   |
+| model.using_penultimate_layer | （可选）是否启用 CLIP 网络中倒数第二层的推导结果，默认 False                                           |
+| model.embedding_dir_path | （可选）指定存放 Texture Inversion 计算所得 embedding 的目录                                  |
+| manager_url | 管理节点 URL |
+| secret | 到管理节点通信所用的密钥 |
+| hypernetwork_dir | （可选）指定存放 Hypernetwork 的文件夹 |
+
+## 许可
+
+本项目代码使用部分来自 [stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui) 中的代码，鉴于原始项目[不具备明确的 LICENSE](https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/2059)，故尚未能为本项目添加对应的 LICENSE。
+
+在这种情况下，使用本项目代码所造成的一切后果需要您自行承担。
