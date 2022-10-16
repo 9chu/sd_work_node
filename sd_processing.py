@@ -19,6 +19,8 @@ from options import DeviceOptions, StableDiffusionModelOptions, DEVICE_HIGH_MEMO
 
 class StableDiffusionProcessingResult(BaseModel):
     images: List[str]
+    width: int
+    height: int
     seed: int
     prompt: str
     negative_prompt: str
@@ -137,9 +139,9 @@ class StableDiffusionProcessingBase:
                 del x_samples_ddim
                 self._device.collect_garbage()
 
-        return StableDiffusionProcessingResult(images=output_images, seed=seed, prompt=prompt,
-                                               negative_prompt=negative_prompt, sampler_type=sampler_type,
-                                               sampler_parameters=self._parameters)
+        return StableDiffusionProcessingResult(images=output_images, width=width, height=height, seed=seed,
+                                               prompt=prompt, negative_prompt=negative_prompt,
+                                               sampler_type=sampler_type, sampler_parameters=self._parameters)
 
 
 class StableDiffusionTex2ImgProcessing(StableDiffusionProcessingBase):

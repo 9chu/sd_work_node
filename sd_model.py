@@ -22,14 +22,24 @@ import ldm.modules.encoders.modules
 from typing import Optional
 
 
+g_hypernetwork = None
+
+
+def set_global_hypernetwork(hypernetwork):
+    global g_hypernetwork
+    g_hypernetwork = hypernetwork
+
+
 # taken from https://github.com/Doggettx/stable-diffusion
 def split_cross_attention_forward(self, x, context=None, mask=None):
+    global g_hypernetwork
+
     h = self.heads
 
     q_in = self.to_q(x)
     context = default(context, x)
 
-    hypernetwork = ldm.modules.attention.CrossAttention.hypernetwork
+    hypernetwork = g_hypernetwork
     # 兼容性处理
     if hypernetwork is not None:
         hypernetwork_layers = hypernetwork.layers if hasattr(hypernetwork, "layers") else hypernetwork
@@ -40,8 +50,8 @@ def split_cross_attention_forward(self, x, context=None, mask=None):
         logging.warning(f"Hypernetwork is not applied, shape={context.shape[2]}")
 
     if hypernetwork_layers is not None:
-        if context.shape[1] == 77 and ldm.modules.attention.CrossAttention.noise_cond:
-            context = context + (torch.randn_like(context) * 0.1)
+        # if context.shape[1] == 77 and ldm.modules.attention.CrossAttention.noise_cond:
+        #     context = context + (torch.randn_like(context) * 0.1)
         k_in = self.to_k(hypernetwork_layers[0](context))
         v_in = self.to_v(hypernetwork_layers[1](context))
     else:
@@ -182,7 +192,7 @@ class StableDiffusionModelHijack:
     def hijack(self, m: ldm.models.diffusion.ddpm.LatentDiffusion):
         cond_stage_model = m.cond_stage_model  # type: ldm.modules.encoders.modules.FrozenCLIPEmbedder
 
-        model_embeddings = cond_stage_model.transformer.embeddings  # type: transformers.models.clip.modeling_clip.CLIPTextTransformer
+        model_embeddings = cond_stage_model.transformer.text_model.embeddings  # type: transformers.models.clip.modeling_clip.CLIPTextTransformer
         model_embeddings.token_embedding = EmbeddingsWithFixes(model_embeddings.token_embedding, self)
         self.clip = m.cond_stage_model = FrozenCLIPEmbedderWithCustomWords(m.cond_stage_model, self)
 

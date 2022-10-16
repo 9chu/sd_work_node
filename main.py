@@ -97,17 +97,26 @@ class Worker:
                 if resp_body.type == "none":
                     continue
                 else:
-                    task_id = resp_body.task_id
+                    task_id = resp_body.taskId
                     parameters = resp_body.parameters
                     try:
                         if resp_body.type == "tex2img":
                             # 执行 tex2img
                             result = self.tex2img(parameters.width, parameters.height, parameters.prompts,
-                                                  parameters.negative_prompts, parameters.steps, parameters.scale,
+                                                  parameters.negativePrompts, parameters.steps, parameters.scale,
                                                   parameters.seed, parameters.count, parameters.module)
+                            result = worker_messages.TaskProcessingResult.construct(
+                                images=result.images,
+                                width=result.width,
+                                height=result.height,
+                                seed=result.seed,
+                                prompt=result.prompt,
+                                negativePrompt=result.negative_prompt,
+                                samplerType=result.sampler_type
+                            )
                         elif resp_body.type == "img2img":
                             initial_images = []
-                            for i in parameters.initial_images:
+                            for i in parameters.initialImages:
                                 with io.BytesIO() as fp:
                                     fp.write(base64.b64decode(i))
                                     fp.seek(0, io.SEEK_SET)
@@ -117,9 +126,18 @@ class Worker:
 
                             # 执行 img2img
                             result = self.img2img(parameters.width, parameters.height, parameters.prompts,
-                                                  parameters.negative_prompts, initial_images, parameters.steps,
-                                                  parameters.steps, parameters.denoise, parameters.resize_mode,
+                                                  parameters.negativePrompts, initial_images, parameters.steps,
+                                                  parameters.steps, parameters.denoise, parameters.resizeMode,
                                                   parameters.seed, parameters.module)
+                            result = worker_messages.TaskProcessingResult.construct(
+                                images=result.images,
+                                width=result.width,
+                                height=result.height,
+                                seed=result.seed,
+                                prompt=result.prompt,
+                                negativePrompt=result.negative_prompt,
+                                samplerType=result.sampler_type
+                            )
                         elif resp_body.type == "upscale":
                             with io.BytesIO() as fp:
                                 fp.write(base64.b64decode(parameters.image))
@@ -127,6 +145,12 @@ class Worker:
                                 img = Image.open(fp)
                                 # 执行 upsacle
                                 result = self.upscale(img, parameters.scale)
+                                result = worker_messages.TaskUpscaleResult.construct(
+                                    image=result.image,
+                                    width=result.width,
+                                    height=result.height,
+                                    scale=result.scale
+                                )
                         else:
                             logging.error(f"Unexpected task {resp_body.type}, id={task_id}")
                             continue
@@ -151,9 +175,9 @@ class Worker:
                 return resp_body.data
 
     async def _update_task_status(self, task_id: int, status: int, error_msg: Optional[str] = None,
-                                  progress: Optional[float] = None, result = None):
+                                  progress: Optional[float] = None, result=None):
         try:
-            req = worker_messages.TaskStateUpdateRequest.construct(task_id=task_id, status=status, error_msg=error_msg,
+            req = worker_messages.TaskStateUpdateRequest.construct(taskId=task_id, status=status, error_msg=error_msg,
                                                                    progress=progress, result=result)
             await self._request("update_task", req, 10)
         except Exception:

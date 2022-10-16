@@ -3,10 +3,22 @@
 import os
 import torch
 import logging
-from ldm.modules.attention import CrossAttention, HyperLogic
 from pathlib import Path
 from options import DEVICE_HIGH_MEMORY
 from device import Device, CPU_TORCH_DEVICE
+from sd_model import set_global_hypernetwork
+
+
+class HyperLogic(torch.nn.Module):
+    logic_multiplier = 1.0
+
+    def __init__(self, dim, heads=0):
+        super().__init__()
+        self.linear1 = torch.nn.Linear(dim, dim*2)
+        self.linear2 = torch.nn.Linear(dim*2, dim)
+
+    def forward(self, _x):
+        return _x + (self.linear2(self.linear1(_x)) * HyperLogic.logic_multiplier)
 
 
 class HypernetworkDatabase:
@@ -36,7 +48,7 @@ class HypernetworkDatabase:
             320: (HyperLogic(320).to(self._default_device), HyperLogic(320).to(self._default_device)),
         }
 
-        state_dict = torch.load(path, map_location=self._default_device)
+        state_dict = torch.load(path, map_location=CPU_TORCH_DEVICE)
         for key in state_dict.keys():
             network[key][0].load_state_dict(state_dict[key][0])
             network[key][1].load_state_dict(state_dict[key][1])
@@ -79,11 +91,11 @@ class HypernetworkDatabase:
                     sub_layer.to(self._device.get_optimal_device())
 
         # 设置到 CrossAttension
-        CrossAttention.set_hypernetwork(hn)
+        set_global_hypernetwork(hn)
         self._last_loaded_hypernetwork = name
 
     def unload_hypernetwork(self):
-        CrossAttention.set_hypernetwork(None)
+        set_global_hypernetwork(None)
 
         if self._last_loaded_hypernetwork is None:
             return
