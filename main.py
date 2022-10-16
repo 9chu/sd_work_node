@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import aiohttp
 import logging
+import requests
 import worker_messages
 from PIL import Image
 from typing import Optional, List
@@ -41,8 +42,8 @@ class Worker:
         if cfg.hypernetwork_dir is not None:
             self._hypernetwork_db.load_hypernetworks()
 
-    def tex2img(self, width: int, height: int, prompts: str, negative_prompts: str, steps: int = 20, scale: float = 7,
-                seed: Optional[int] = None, count: int = 1, module: Optional[str] = None) \
+    def tex2img(self, task_id: int, width: int, height: int, prompts: str, negative_prompts: str, steps: int = 20,
+                scale: float = 7, seed: Optional[int] = None, count: int = 1, module: Optional[str] = None) \
             -> StableDiffusionProcessingResult:
         try:
             parameters = StableDiffusionSamplerParameters.construct(steps=steps, scale=scale)
@@ -52,14 +53,17 @@ class Worker:
             if module is not None:
                 self._hypernetwork_db.load_hypernetwork(module)
 
+            # 设置 callback
+            processor.set_on_progress_callback(lambda p: self._update_task_progress_block(task_id, p))
+
             # 执行计算过程
             return processor.run(width, height, SAMPLER_TYPE_DDIM, count, prompts, negative_prompts, seed)
         finally:
             self._hypernetwork_db.unload_hypernetwork()
 
-    def img2img(self, width: int, height: int, prompts: str, negative_prompts: str, initial_images: List[Image.Image],
-                steps: int = 20, scale: float = 7, denoise: float = 0.7, resize_mode: int = 0,
-                seed: Optional[int] = None, module: Optional[str] = None) \
+    def img2img(self, task_id: int, width: int, height: int, prompts: str, negative_prompts: str,
+                initial_images: List[Image.Image], steps: int = 20, scale: float = 7, denoise: float = 0.7,
+                resize_mode: int = 0, seed: Optional[int] = None, module: Optional[str] = None) \
             -> StableDiffusionProcessingResult:
         try:
             parameters = StableDiffusionSamplerParameters.construct(steps=steps, scale=scale,
@@ -69,6 +73,9 @@ class Worker:
             # 施加 Hypernetwork
             if module is not None:
                 self._hypernetwork_db.load_hypernetwork(module)
+
+            # 设置 callback
+            processor.set_on_progress_callback(lambda p: self._update_task_progress_block(task_id, p))
 
             # 执行计算过程
             return processor.run(width, height, SAMPLER_TYPE_DDIM, len(initial_images), prompts, negative_prompts, seed,
@@ -80,6 +87,7 @@ class Worker:
         return self._upscaler.upscale(image, scale)
 
     async def run(self):
+        logging.info("Begin to service")
         try:
             while True:
                 # 拉取任务
@@ -105,7 +113,7 @@ class Worker:
                             parameters = worker_messages.Tex2ImgParameters.construct(**parameters)
 
                             # 执行 tex2img
-                            result = self.tex2img(parameters.width, parameters.height, parameters.prompts,
+                            result = self.tex2img(task_id, parameters.width, parameters.height, parameters.prompts,
                                                   parameters.negativePrompts, parameters.steps, parameters.scale,
                                                   parameters.seed, parameters.count, parameters.module)
                             result = worker_messages.TaskProcessingResult.construct(
@@ -130,7 +138,7 @@ class Worker:
                                     del img
 
                             # 执行 img2img
-                            result = self.img2img(parameters.width, parameters.height, parameters.prompts,
+                            result = self.img2img(task_id, parameters.width, parameters.height, parameters.prompts,
                                                   parameters.negativePrompts, initial_images, parameters.steps,
                                                   parameters.steps, parameters.denoise, parameters.resizeMode,
                                                   parameters.seed, parameters.module)
@@ -192,6 +200,19 @@ class Worker:
             req = worker_messages.TaskStateUpdateRequest.construct(taskId=task_id, status=status, error_msg=error_msg,
                                                                    progress=progress, result=result)
             await self._request("updateTask", req, 10)
+        except Exception:
+            logging.exception("Update task status error")
+
+    def _update_task_progress_block(self, task_id: int, progress: float):
+        headers = {"X-API-SECRET": self._cfg.secret, "Content-Type": "application/json"}
+        payload = {
+            "taskId": task_id,
+            "status": worker_messages.TASK_STATUS_RUNNING,
+            "progress": progress,
+        }
+        try:
+            requests.post(f"{self._cfg.manager_url}/api/TaskDispatch/updateTask", json=payload, headers=headers,
+                          timeout=1).close()
         except Exception:
             logging.exception("Update task status error")
 

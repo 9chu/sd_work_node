@@ -13,7 +13,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 from device import Device
 from sd_model import StableDiffusionModel
-from sd_sampler import StableDiffusionSamplerParameters, StableDiffusionSamplerBase, create_sampler
+from sd_sampler import StableDiffusionSamplerParameters, StableDiffusionSamplerBase, create_sampler, \
+    StableDiffusionSamplingProgress
 from options import DeviceOptions, StableDiffusionModelOptions, DEVICE_HIGH_MEMORY
 
 
@@ -36,6 +37,9 @@ class StableDiffusionProcessingBase:
         self._sampler: Optional[StableDiffusionSamplerBase] = None
         self._width = 0
         self._height = 0
+        self._count = 0
+        self._finished_count = 0
+        self._on_progress_callback = None
 
     def _create_random_tensors(self, shape: List[int], seeds: List[int]):
         xs = []
@@ -74,11 +78,21 @@ class StableDiffusionProcessingBase:
                 initial_images: Optional[List[Image.Image]]):
         raise NotImplementedError()
 
+    def _on_progress(self, progress: StableDiffusionSamplingProgress):
+        if self._on_progress_callback is not None:
+            # 从单个的进度还原到整体
+            self._on_progress_callback((self._finished_count + progress.get_percent()) / self._count)
+
+    def set_on_progress_callback(self, callback):
+        self._on_progress_callback = callback
+
     def run(self, width: int, height: int, sampler_type: int, count: int, prompt: str, negative_prompt: str,
             seed: Optional[int] = None, initial_images: Optional[List[Image.Image]] = None):
         assert initial_images is None or len(initial_images) == count
         self._width = width
         self._height = height
+        self._count = count
+        self._finished_count = 0
 
         self._device.collect_garbage()
 
@@ -92,6 +106,10 @@ class StableDiffusionProcessingBase:
         with torch.no_grad(), self._model.get_sd_model().ema_scope():
             with self._device.auto_cast():
                 self._init(sampler_type, all_prompts, all_seeds)
+
+            # 设置 progress 反馈
+            if self._sampler:
+                self._sampler.set_on_progress_callback(self._on_progress)
 
             for n in range(count):
                 prompts = all_prompts[n: (n + 1)]
@@ -138,6 +156,8 @@ class StableDiffusionProcessingBase:
                 # 清理
                 del x_samples_ddim
                 self._device.collect_garbage()
+
+                self._finished_count += 1
 
         return StableDiffusionProcessingResult(images=output_images, width=width, height=height, seed=seed,
                                                prompt=prompt, negative_prompt=negative_prompt,
