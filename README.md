@@ -7,12 +7,12 @@
 - Img2Img（仅全图）
 - Upscale（仅 ESRGan）
 
-'''mermaid
+```mermaid
 graph
     A[sd_work_manager] --> B[sd_work_node]
     A[sd_work_manager] --> C[sd_work_node]
     A[sd_work_manager] --> D[sd_work_node]
-'''
+```
 
 基于`Work-stealing`模式设计，可以多点部署，需要与`sd_work_manager`交互，对外功能由`sd_work_manager`提供。
 
