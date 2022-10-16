@@ -1,6 +1,7 @@
 #!python3
 # -*- coding: utf-8 -*-
 import io
+import zlib
 import base64
 import argparse
 import asyncio
@@ -84,7 +85,7 @@ class Worker:
                 # 拉取任务
                 try:
                     # pull 超时 300 秒
-                    resp = await self._request("pull_task", worker_messages.TaskPullRequest.construct(), 300)
+                    resp = await self._request("pullTask", worker_messages.TaskPullRequest.construct(), 300)
                 except asyncio.TimeoutError:
                     continue
                 except Exception as ex:
@@ -101,6 +102,8 @@ class Worker:
                     parameters = resp_body.parameters
                     try:
                         if resp_body.type == "tex2img":
+                            parameters = worker_messages.Tex2ImgParameters.construct(**parameters)
+
                             # 执行 tex2img
                             result = self.tex2img(parameters.width, parameters.height, parameters.prompts,
                                                   parameters.negativePrompts, parameters.steps, parameters.scale,
@@ -115,6 +118,8 @@ class Worker:
                                 samplerType=result.sampler_type
                             )
                         elif resp_body.type == "img2img":
+                            parameters = worker_messages.Img2ImgParameters.construct(**parameters)
+
                             initial_images = []
                             for i in parameters.initialImages:
                                 with io.BytesIO() as fp:
@@ -139,6 +144,8 @@ class Worker:
                                 samplerType=result.sampler_type
                             )
                         elif resp_body.type == "upscale":
+                            parameters = worker_messages.UpscaleParameters.construct(**parameters)
+
                             with io.BytesIO() as fp:
                                 fp.write(base64.b64decode(parameters.image))
                                 fp.seek(0, io.SEEK_SET)
@@ -165,21 +172,26 @@ class Worker:
 
     async def _request(self, method: str, args: worker_messages.RequestMessage, timeout=300):
         headers = {"X-API-SECRET": self._cfg.secret, "Content-Type": "application/json"}
+        payload = args.json()
+        # 压缩数据
+        if len(payload) > 4096:
+            payload = zlib.compress(payload.encode('utf-8'))
+            headers['Content-Encoding'] = 'deflate'
         async with aiohttp.ClientSession(self._cfg.manager_url, headers=headers) as session:
-            async with session.post(f"/api/TaskDispatcher/{method}", data=args.json(), timeout=timeout) as resp:
+            async with session.post(f"/api/TaskDispatch/{method}", data=payload, timeout=timeout) as resp:
                 if resp.status != 200:
                     raise RuntimeError(f"Send request fail, method={method}, status={resp.status}")
-                resp_body = await resp.json()  # type: worker_messages.ResponseMessage
-                if resp_body.code != 0:
-                    raise RuntimeError(f"API error, method={method}, code={resp_body.code}, msg={resp_body.msg}")
-                return resp_body.data
+                resp_body = await resp.json()
+                if resp_body["code"] != 0:
+                    raise RuntimeError(f"API error, method={method}, code={resp_body['code']}, msg={resp_body['msg']}")
+                return resp_body["data"]
 
     async def _update_task_status(self, task_id: int, status: int, error_msg: Optional[str] = None,
                                   progress: Optional[float] = None, result=None):
         try:
             req = worker_messages.TaskStateUpdateRequest.construct(taskId=task_id, status=status, error_msg=error_msg,
                                                                    progress=progress, result=result)
-            await self._request("update_task", req, 10)
+            await self._request("updateTask", req, 10)
         except Exception:
             logging.exception("Update task status error")
 

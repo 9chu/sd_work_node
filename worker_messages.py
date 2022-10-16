@@ -11,7 +11,7 @@ class RequestMessage(BaseModel):
 class ResponseMessage(BaseModel):
     code: int
     msg: str
-    data: BaseModel
+    data: dict
 
 
 class Tex2ImgParameters(BaseModel):
@@ -45,15 +45,15 @@ class UpscaleParameters(BaseModel):
     scale: float
 
 
-# method: 'pull_task'
+# method: 'pullTask'
 class TaskPullRequest(RequestMessage):
     pass
 
 
 class TaskPullResponse(BaseModel):
     type: str  # 'none', 'tex2img', 'img2img', 'upscale'
-    taskId: int
-    parameters: Optional[Union[Tex2ImgParameters, Img2ImgParameters, UpscaleParameters]]
+    taskId: Optional[int]
+    parameters: Optional[dict]
 
 
 TASK_STATUS_RUNNING = 0
@@ -78,7 +78,7 @@ class TaskUpscaleResult(BaseModel):
     scale: float
 
 
-# method: 'update_task'
+# method: 'updateTask'
 class TaskStateUpdateRequest(RequestMessage):
     taskId: int
     status: int
