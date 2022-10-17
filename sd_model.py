@@ -456,7 +456,7 @@ class StableDiffusionModel:
                          diff_model.time_embed
                 diff_model.input_blocks, diff_model.middle_block, diff_model.output_blocks, diff_model.time_embed =\
                     None, None, None, None
-                self._model.model.to(device)
+                self._model.model.to(device.get_optimal_device())
                 diff_model.input_blocks, diff_model.middle_block, diff_model.output_blocks, diff_model.time_embed =\
                     stored
 
