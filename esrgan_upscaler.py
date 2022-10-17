@@ -81,6 +81,7 @@ class ESRGanUpscaler(UpscalerModel):
 
         pretrained_net = fix_model_layers(self._model, pretrained_net)
         self._model.load_state_dict(pretrained_net)
+        self._model.to(self._real_device)
         self._model.eval()
 
     def _upscale(self, img: Image.Image):
