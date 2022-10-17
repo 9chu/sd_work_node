@@ -1,6 +1,7 @@
 #!python3
 # -*- coding: utf-8 -*-
 import io
+import math
 import zlib
 import base64
 import argparse
@@ -42,6 +43,7 @@ class Worker:
                                                      '' if cfg.hypernetwork_dir is None else cfg.hypernetwork_dir)
         if cfg.hypernetwork_dir is not None:
             self._hypernetwork_db.load_hypernetworks()
+        self._last_progress = None
 
     def tex2img(self, task_id: int, width: int, height: int, prompts: str, negative_prompts: str, steps: int = 20,
                 scale: float = 7, seed: Optional[int] = None, count: int = 1, module: Optional[str] = None) \
@@ -58,6 +60,7 @@ class Worker:
             processor.set_on_progress_callback(lambda p: self._update_task_progress_block(task_id, p))
 
             # 执行计算过程
+            self._last_progress = None
             return processor.run(width, height, SAMPLER_TYPE_DDIM, count, prompts, negative_prompts, seed)
         finally:
             self._hypernetwork_db.unload_hypernetwork()
@@ -79,6 +82,7 @@ class Worker:
             processor.set_on_progress_callback(lambda p: self._update_task_progress_block(task_id, p))
 
             # 执行计算过程
+            self._last_progress = None
             return processor.run(width, height, SAMPLER_TYPE_DDIM, len(initial_images), prompts, negative_prompts, seed,
                                  initial_images)
         finally:
@@ -200,11 +204,17 @@ class Worker:
         try:
             req = worker_messages.TaskStateUpdateRequest.construct(taskId=task_id, status=status, errorMsg=error_msg,
                                                                    progress=progress, result=result)
-            await self._request("updateTask", req, 10)
+            await self._request("updateTask", req, 60)  # 对于超大图片，超时不能过短
         except Exception:
             logging.exception("Update task status error")
 
     def _update_task_progress_block(self, task_id: int, progress: float):
+        # 由于网络I/O比较费时，我们在这里限制只有增长 10% 才汇报一次
+        if (self._last_progress is not None) and progress < 0.95 and math.abs(progress - self._last_progress) < 0.1:
+            return
+        self._last_progress = progress
+
+        # 发送 HTTP 请求，此处必须阻塞发
         headers = {"X-API-SECRET": self._cfg.secret, "Content-Type": "application/json"}
         payload = {
             "taskId": task_id,
@@ -213,7 +223,7 @@ class Worker:
         }
         try:
             requests.post(f"{self._cfg.manager_url}{self._cfg.url_path_prefix}/TaskDispatch/updateTask", json=payload, headers=headers,
-                          timeout=1).close()
+                          timeout=3)
         except Exception:
             logging.exception("Update task status error")
 

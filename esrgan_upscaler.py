@@ -7,6 +7,7 @@ from PIL import Image
 from upscaler_model import UpscalerModel
 from basicsr.utils.download_util import load_file_from_url
 from device import Device, CPU_TORCH_DEVICE
+from options import DEVICE_HIGH_MEMORY
 
 
 def fix_model_layers(crt_model, pretrained_net):
@@ -72,28 +73,37 @@ class ESRGanUpscaler(UpscalerModel):
         self._real_device = self._device.get_optimal_device()
         if self._real_device.type == "mps":
             self._real_device = CPU_TORCH_DEVICE
+        self._swap_inout = (self._device.get_options().memory_level != DEVICE_HIGH_MEMORY and self._real_device != CPU_TORCH_DEVICE)
 
         self._model_path = load_file_from_url("https://github.com/cszn/KAIR/releases/download/v1.0/ESRGAN.pth",
                                               file_name="ESRGAN_4x.pth")
 
-        pretrained_net = torch.load(self._model_path, map_location=self._real_device)
+        pretrained_net = torch.load(self._model_path, map_location=CPU_TORCH_DEVICE if self._swap_inout else self._real_device)
         self._model = arch.RRDBNet(3, 3, 64, 23, gc=32)
 
         pretrained_net = fix_model_layers(self._model, pretrained_net)
         self._model.load_state_dict(pretrained_net)
-        self._model.to(self._real_device)
+        self._model.to(CPU_TORCH_DEVICE if self._swap_inout else self._real_device)
         self._model.eval()
 
     def _upscale(self, img: Image.Image):
-        img = np.array(img)
-        img = img[:, :, ::-1]
-        img = np.moveaxis(img, 2, 0) / 255
-        img = torch.from_numpy(img).float()
-        img = img.unsqueeze(0).to(self._real_device)
-        with torch.no_grad():
-            output = self._model(img)
-        output = output.squeeze().float().cpu().clamp_(0, 1).numpy()
-        output = 255. * np.moveaxis(output, 0, 2)
-        output = output.astype(np.uint8)
-        output = output[:, :, ::-1]
-        return Image.fromarray(output, "RGB")
+        self._device.collect_garbage()
+        if self._swap_inout:
+            self._model.to(self._real_device)
+        try:
+            img = np.array(img)
+            img = img[:, :, ::-1]
+            img = np.moveaxis(img, 2, 0) / 255
+            img = torch.from_numpy(img).float()
+            img = img.unsqueeze(0).to(self._real_device)
+            with torch.no_grad():
+                output = self._model(img)
+            output = output.squeeze().float().cpu().clamp_(0, 1).numpy()
+            output = 255. * np.moveaxis(output, 0, 2)
+            output = output.astype(np.uint8)
+            output = output[:, :, ::-1]
+            return Image.fromarray(output, "RGB")
+        finally:
+            if self._swap_inout:
+                self._model.to(CPU_TORCH_DEVICE)
+                self._device.collect_garbage()
