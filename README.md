@@ -24,6 +24,8 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+由于`CLIP`安装脚本对`torch`、`numpy`等存在依赖，可能需要分两次对依赖进行安装。
+
 ## 运行环境
 
 - Python >= 3.9
@@ -35,7 +37,7 @@ pip install -r requirements.txt
 pip uninstall torch torchvision torchaudio -y
 pip install --pre torch==1.13.0.dev20220922 torchvision==0.14.0.dev20220924 -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html --no-deps
 cd venv/src/latent-diffusion
-git apply ../../../ldm.patch 
+git apply ../../../ldm.patch
 ```
 
 以获取硬件加速支持。
@@ -77,6 +79,7 @@ python3 ./main.py --config config.json --verbose
 | model.using_penultimate_layer | （可选）是否启用 CLIP 网络中倒数第二层的推导结果，默认 False                                           |
 | model.embedding_dir_path      | （可选）指定存放 Texture Inversion 计算所得 embedding 的目录                                  |
 | manager_url                   | 管理节点 URL                                                                       |
+| url_path_prefix               | （可选）URL前缀，默认'/api'                                                         |
 | secret                        | 到管理节点通信所用的密钥                                                                   |
 | hypernetwork_dir              | （可选）指定存放 Hypernetwork 的文件夹                                                     |
 

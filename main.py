@@ -27,6 +27,7 @@ class Configure(BaseModel):
     device: DeviceOptions
     model: StableDiffusionModelOptions
     manager_url: str
+    url_path_prefix: str = "/api"
     hypernetwork_dir: Optional[str] = None
     secret: str
 
@@ -186,7 +187,7 @@ class Worker:
             payload = zlib.compress(payload.encode('utf-8'))
             headers['Content-Encoding'] = 'deflate'
         async with aiohttp.ClientSession(self._cfg.manager_url, headers=headers) as session:
-            async with session.post(f"/api/TaskDispatch/{method}", data=payload, timeout=timeout) as resp:
+            async with session.post(f"{self._cfg.url_path_prefix}/TaskDispatch/{method}", data=payload, timeout=timeout) as resp:
                 if resp.status != 200:
                     raise RuntimeError(f"Send request fail, method={method}, status={resp.status}")
                 resp_body = await resp.json()
@@ -211,7 +212,7 @@ class Worker:
             "progress": progress,
         }
         try:
-            requests.post(f"{self._cfg.manager_url}/api/TaskDispatch/updateTask", json=payload, headers=headers,
+            requests.post(f"{self._cfg.manager_url}{self._cfg.url_path_prefix}/TaskDispatch/updateTask", json=payload, headers=headers,
                           timeout=1).close()
         except Exception:
             logging.exception("Update task status error")
