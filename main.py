@@ -198,7 +198,7 @@ class Worker:
     async def _update_task_status(self, task_id: int, status: int, error_msg: Optional[str] = None,
                                   progress: Optional[float] = None, result=None):
         try:
-            req = worker_messages.TaskStateUpdateRequest.construct(taskId=task_id, status=status, error_msg=error_msg,
+            req = worker_messages.TaskStateUpdateRequest.construct(taskId=task_id, status=status, errorMsg=error_msg,
                                                                    progress=progress, result=result)
             await self._request("updateTask", req, 10)
         except Exception:
