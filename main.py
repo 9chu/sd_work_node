@@ -1,7 +1,6 @@
 #!python3
 # -*- coding: utf-8 -*-
 import io
-import math
 import zlib
 import base64
 import argparse
@@ -210,7 +209,7 @@ class Worker:
 
     def _update_task_progress_block(self, task_id: int, progress: float):
         # 由于网络I/O比较费时，我们在这里限制只有增长 10% 才汇报一次
-        if (self._last_progress is not None) and progress < 0.95 and math.abs(progress - self._last_progress) < 0.1:
+        if (self._last_progress is not None) and progress < 0.95 and abs(progress - self._last_progress) < 0.1:
             return
         self._last_progress = progress
 
