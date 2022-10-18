@@ -50,6 +50,8 @@ class HypernetworkDatabase:
 
         state_dict = torch.load(path, map_location=CPU_TORCH_DEVICE)
         for key in state_dict.keys():
+            if isinstance(key, str):  # StableDiffusionWebUI 训练结果兼容处理
+                continue
             network[key][0].load_state_dict(state_dict[key][0])
             network[key][1].load_state_dict(state_dict[key][1])
 
