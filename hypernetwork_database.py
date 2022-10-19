@@ -6,22 +6,35 @@ import logging
 from pathlib import Path
 from options import DEVICE_HIGH_MEMORY
 from device import Device, CPU_TORCH_DEVICE
-from sd_model import set_global_hypernetwork
 
 
 class HyperLogic(torch.nn.Module):
-    logic_multiplier = 1.0
-
     def __init__(self, dim, heads=0):
         super().__init__()
         self.linear1 = torch.nn.Linear(dim, dim*2)
         self.linear2 = torch.nn.Linear(dim*2, dim)
 
     def forward(self, _x):
-        return _x + (self.linear2(self.linear1(_x)) * HyperLogic.logic_multiplier)
+        return _x + (self.linear2(self.linear1(_x)) * HypernetworkDatabase.global_hypernetwork_multiplier)
 
 
 class HypernetworkDatabase:
+    global_hypernetwork = None
+    global_hypernetwork_multiplier = 1.0
+
+    @staticmethod
+    def apply_hypernetwork(context):
+        if HypernetworkDatabase.global_hypernetwork is not None:
+            hypernetwork_layers = HypernetworkDatabase.global_hypernetwork.get(context.shape[2], None)
+            if hypernetwork_layers is None:
+                logging.warning(f"Hypernetwork is set but not applied, shape={context.shape[2]}")
+        else:
+            return context, context
+
+        context_k = hypernetwork_layers[0](context)
+        context_v = hypernetwork_layers[1](context)
+        return context_k, context_v
+
     def __init__(self, device: Device, hypernetwork_dir: str):
         self._logger = logging.getLogger("HypernetworkDatabase")
         self._device = device
@@ -91,11 +104,11 @@ class HypernetworkDatabase:
                     sub_layer.to(self._device.get_optimal_device())
 
         # 设置到 CrossAttension
-        set_global_hypernetwork(hn)
+        HypernetworkDatabase.global_hypernetwork = hn
         self._last_loaded_hypernetwork = name
 
     def unload_hypernetwork(self):
-        set_global_hypernetwork(None)
+        HypernetworkDatabase.global_hypernetwork = None
 
         if self._last_loaded_hypernetwork is None:
             return
@@ -107,4 +120,5 @@ class HypernetworkDatabase:
                 layer = hn[k]
                 for sub_layer in layer:
                     sub_layer.to(self._default_device)
+            self._device.collect_garbage()
         self._last_loaded_hypernetwork = None
