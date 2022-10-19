@@ -82,7 +82,7 @@ class TaskUpscaleResult(BaseModel):
 class TaskStateUpdateRequest(RequestMessage):
     taskId: int
     status: int
-    error_msg: Optional[str]  # when TASK_STATUS_ERROR
+    errorMsg: Optional[str]  # when TASK_STATUS_ERROR
     progress: Optional[float]  # when TASK_STATUS_RUNNING
     result: Optional[Union[TaskProcessingResult, TaskUpscaleResult]]  # when TASK_STATUS_FINISHED
 

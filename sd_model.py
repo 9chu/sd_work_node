@@ -290,16 +290,16 @@ class StableDiffusionModel:
             parent_models[self._model.cond_stage_model.transformer] = self._model.cond_stage_model
 
             if device.get_options().memory_level == DEVICE_MEDIUM_MEMORY:
-                self._model.register_forward_pre_hook(send_me_to_device)
+                self._model.model.register_forward_pre_hook(send_me_to_device)
             else:
                 # 如果启用了低内存优化，则对 Diffusion Model 也进行类似处理
-                diff_model = self._model.diffusion_model
+                diff_model = self._model.model.diffusion_model
 
                 stored = diff_model.input_blocks, diff_model.middle_block, diff_model.output_blocks,\
                          diff_model.time_embed
                 diff_model.input_blocks, diff_model.middle_block, diff_model.output_blocks, diff_model.time_embed =\
                     None, None, None, None
-                self._model.model.to(device)
+                self._model.model.to(device.get_optimal_device())
                 diff_model.input_blocks, diff_model.middle_block, diff_model.output_blocks, diff_model.time_embed =\
                     stored
 

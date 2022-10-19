@@ -12,4 +12,5 @@ transformers==4.23.1
 pytorch_lightning==1.7.7
 clip @ git+https://github.com/openai/CLIP@d50d76daa670286dd6cacf3bcd80b5e4823fc8e1
 kornia==0.6.8
+-e git+https://github.com/CompVis/taming-transformers.git@24268930bf1dce879235a7fddd0b2355b84d7ea6#egg=taming-transformers
 psutil==5.9.3

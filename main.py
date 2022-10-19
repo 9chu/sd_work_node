@@ -27,6 +27,7 @@ class Configure(BaseModel):
     device: DeviceOptions
     model: StableDiffusionModelOptions
     manager_url: str
+    url_path_prefix: str = "/api"
     hypernetwork_dir: Optional[str] = None
     secret: str
 
@@ -41,6 +42,7 @@ class Worker:
                                                      '' if cfg.hypernetwork_dir is None else cfg.hypernetwork_dir)
         if cfg.hypernetwork_dir is not None:
             self._hypernetwork_db.load_hypernetworks()
+        self._last_progress = None
 
     def tex2img(self, task_id: int, width: int, height: int, prompts: str, negative_prompts: str, steps: int = 20,
                 scale: float = 7, seed: Optional[int] = None, count: int = 1, module: Optional[str] = None) \
@@ -57,6 +59,7 @@ class Worker:
             processor.set_on_progress_callback(lambda p: self._update_task_progress_block(task_id, p))
 
             # 执行计算过程
+            self._last_progress = None
             return processor.run(width, height, SAMPLER_TYPE_DDIM, count, prompts, negative_prompts, seed)
         finally:
             self._hypernetwork_db.unload_hypernetwork()
@@ -78,6 +81,7 @@ class Worker:
             processor.set_on_progress_callback(lambda p: self._update_task_progress_block(task_id, p))
 
             # 执行计算过程
+            self._last_progress = None
             return processor.run(width, height, SAMPLER_TYPE_DDIM, len(initial_images), prompts, negative_prompts, seed,
                                  initial_images)
         finally:
@@ -186,7 +190,7 @@ class Worker:
             payload = zlib.compress(payload.encode('utf-8'))
             headers['Content-Encoding'] = 'deflate'
         async with aiohttp.ClientSession(self._cfg.manager_url, headers=headers) as session:
-            async with session.post(f"/api/TaskDispatch/{method}", data=payload, timeout=timeout) as resp:
+            async with session.post(f"{self._cfg.url_path_prefix}/TaskDispatch/{method}", data=payload, timeout=timeout) as resp:
                 if resp.status != 200:
                     raise RuntimeError(f"Send request fail, method={method}, status={resp.status}")
                 resp_body = await resp.json()
@@ -197,13 +201,19 @@ class Worker:
     async def _update_task_status(self, task_id: int, status: int, error_msg: Optional[str] = None,
                                   progress: Optional[float] = None, result=None):
         try:
-            req = worker_messages.TaskStateUpdateRequest.construct(taskId=task_id, status=status, error_msg=error_msg,
+            req = worker_messages.TaskStateUpdateRequest.construct(taskId=task_id, status=status, errorMsg=error_msg,
                                                                    progress=progress, result=result)
-            await self._request("updateTask", req, 10)
+            await self._request("updateTask", req, 60)  # 对于超大图片，超时不能过短
         except Exception:
             logging.exception("Update task status error")
 
     def _update_task_progress_block(self, task_id: int, progress: float):
+        # 由于网络I/O比较费时，我们在这里限制只有增长 10% 才汇报一次
+        if (self._last_progress is not None) and progress < 0.95 and abs(progress - self._last_progress) < 0.1:
+            return
+        self._last_progress = progress
+
+        # 发送 HTTP 请求，此处必须阻塞发
         headers = {"X-API-SECRET": self._cfg.secret, "Content-Type": "application/json"}
         payload = {
             "taskId": task_id,
@@ -211,8 +221,8 @@ class Worker:
             "progress": progress,
         }
         try:
-            requests.post(f"{self._cfg.manager_url}/api/TaskDispatch/updateTask", json=payload, headers=headers,
-                          timeout=1).close()
+            requests.post(f"{self._cfg.manager_url}{self._cfg.url_path_prefix}/TaskDispatch/updateTask", json=payload, headers=headers,
+                          timeout=3)
         except Exception:
             logging.exception("Update task status error")
 
