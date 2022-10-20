@@ -54,10 +54,10 @@ class StableDiffusionModelHijack:
                 # ldm.modules.attention.CrossAttention.forward = xformers_attention_forward
                 # ldm.modules.diffusionmodules.model.AttnBlock.forward = xformers_attnblock_forward
 
-                # ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward_invokeAI
+                ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward_invokeAI
 
-                ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward
-                ldm.modules.diffusionmodules.model.AttnBlock.forward = cross_attention_attnblock_forward
+                # ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward
+                # ldm.modules.diffusionmodules.model.AttnBlock.forward = cross_attention_attnblock_forward
 
         def flatten(el):
             flattened = [flatten(children) for children in el.children()]
