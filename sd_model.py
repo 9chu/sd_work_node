@@ -14,7 +14,7 @@ from options import DeviceOptions, StableDiffusionModelOptions, DEVICE_HIGH_MEMO
 from device import Device, CPU_TORCH_DEVICE
 from embedding_database import EmbeddingDatabase
 from prompt_parser import parse_prompt_attention
-from sd_optimization import split_cross_attention_forward_invokeAI
+from sd_optimization import split_cross_attention_forward_invokeAI, xformers_attention_forward, xformers_attnblock_forward
 
 # for type hints
 import transformers.models.clip.modeling_clip
@@ -45,7 +45,9 @@ class StableDiffusionModelHijack:
             ldm.modules.diffusionmodules.model.nonlinearity = silu
 
             if self.device.get_optimal_device() != CPU_TORCH_DEVICE:
-                ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward_invokeAI
+                ldm.modules.attention.CrossAttention.forward = xformers_attention_forward
+                ldm.modules.diffusionmodules.model.AttnBlock.forward = xformers_attnblock_forward
+                # ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward_invokeAI
 
         def flatten(el):
             flattened = [flatten(children) for children in el.children()]

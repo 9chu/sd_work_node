@@ -14,3 +14,4 @@ clip @ git+https://github.com/openai/CLIP@d50d76daa670286dd6cacf3bcd80b5e4823fc8
 kornia==0.6.8
 -e git+https://github.com/CompVis/taming-transformers.git@24268930bf1dce879235a7fddd0b2355b84d7ea6#egg=taming-transformers
 psutil==5.9.3
+-e git+https://github.com/facebookresearch/xformers@51dd1192620271598ba71bb1351c1c5508720b31#egg=xformers
