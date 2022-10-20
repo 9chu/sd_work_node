@@ -1,11 +1,75 @@
 import math
 import psutil
 import torch
-import xformers.ops
+#import xformers.ops
 from torch import einsum
 from ldm.util import default
 from einops import rearrange
 from hypernetwork_database import HypernetworkDatabase
+
+
+def split_cross_attention_forward(self, x, context=None, mask=None):
+    h = self.heads
+
+    q_in = self.to_q(x)
+    context = default(context, x)
+
+    context_k, context_v = HypernetworkDatabase.apply_hypernetwork(context)
+    k_in = self.to_k(context_k)
+    v_in = self.to_v(context_v)
+
+    k_in *= self.scale
+
+    del context, x
+
+    q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q_in, k_in, v_in))
+    del q_in, k_in, v_in
+
+    r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device, dtype=q.dtype)
+
+    if q.device.type == 'cuda':
+        stats = torch.cuda.memory_stats(q.device)
+        mem_active = stats['active_bytes.all.current']
+        mem_reserved = stats['reserved_bytes.all.current']
+        mem_free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device())
+        mem_free_torch = mem_reserved - mem_active
+        mem_free_total = mem_free_cuda + mem_free_torch
+    else:
+        mem_free_total = None
+
+    gb = 1024 ** 3
+    tensor_size = q.shape[0] * q.shape[1] * k.shape[1] * q.element_size()
+    modifier = 3 if q.element_size() == 2 else 2.5
+    mem_required = tensor_size * modifier
+    steps = 1
+
+    if mem_free_total is not None and mem_required > mem_free_total:
+        steps = 2 ** (math.ceil(math.log(mem_required / mem_free_total, 2)))
+        # print(f"Expected tensor size:{tensor_size/gb:0.1f}GB, cuda free:{mem_free_cuda/gb:0.1f}GB "
+        #       f"torch free:{mem_free_torch/gb:0.1f} total:{mem_free_total/gb:0.1f} steps:{steps}")
+
+    if steps > 64:
+        max_res = math.floor(math.sqrt(math.sqrt(mem_free_total / 2.5)) / 8) * 64
+        raise RuntimeError(f'Not enough memory, use lower resolution (max approx. {max_res}x{max_res}). '
+                           f'Need: {mem_required / 64 / gb:0.1f}GB free, Have:{mem_free_total / gb:0.1f}GB free')
+
+    slice_size = q.shape[1] // steps if (q.shape[1] % steps) == 0 else q.shape[1]
+    for i in range(0, q.shape[1], slice_size):
+        end = i + slice_size
+        s1 = einsum('b i d, b j d -> b i j', q[:, i:end], k)
+
+        s2 = s1.softmax(dim=-1, dtype=q.dtype)
+        del s1
+
+        r1[:, i:end] = einsum('b i j, b j d -> b i d', s2, v)
+        del s2
+
+    del q, k, v
+
+    r2 = rearrange(r1, '(b h) n d -> b n (h d)', h=h)
+    del r1
+
+    return self.to_out(r2)
 
 
 # -- Taken from https://github.com/invoke-ai/InvokeAI --
@@ -100,21 +164,22 @@ def split_cross_attention_forward_invokeAI(self, x, context=None, mask=None):
 
 # -- End of code from https://github.com/invoke-ai/InvokeAI --
 
-def xformers_attention_forward(self, x, context=None, mask=None):
-    h = self.heads
-    q_in = self.to_q(x)
-    context = default(context, x)
+# def xformers_attention_forward(self, x, context=None, mask=None):
+#     h = self.heads
+#     q_in = self.to_q(x)
+#     context = default(context, x)
+#
+#     context_k, context_v = HypernetworkDatabase.apply_hypernetwork(context)
+#     k_in = self.to_k(context_k)
+#     v_in = self.to_v(context_v)
+#
+#     q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h=h), (q_in, k_in, v_in))
+#     del q_in, k_in, v_in
+#     out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None)
+#
+#     out = rearrange(out, 'b n h d -> b n (h d)', h=h)
+#     return self.to_out(out)
 
-    context_k, context_v = HypernetworkDatabase.apply_hypernetwork(context)
-    k_in = self.to_k(context_k)
-    v_in = self.to_v(context_v)
-
-    q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h=h), (q_in, k_in, v_in))
-    del q_in, k_in, v_in
-    out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None)
-
-    out = rearrange(out, 'b n h d -> b n (h d)', h=h)
-    return self.to_out(out)
 
 def cross_attention_attnblock_forward(self, x):
     h_ = x
@@ -137,18 +202,21 @@ def cross_attention_attnblock_forward(self, x):
 
     h_ = torch.zeros_like(k, device=q.device)
 
-    stats = torch.cuda.memory_stats(q.device)
-    mem_active = stats['active_bytes.all.current']
-    mem_reserved = stats['reserved_bytes.all.current']
-    mem_free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device())
-    mem_free_torch = mem_reserved - mem_active
-    mem_free_total = mem_free_cuda + mem_free_torch
+    if q.device.type == 'cuda':
+        stats = torch.cuda.memory_stats(q.device)
+        mem_active = stats['active_bytes.all.current']
+        mem_reserved = stats['reserved_bytes.all.current']
+        mem_free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device())
+        mem_free_torch = mem_reserved - mem_active
+        mem_free_total = mem_free_cuda + mem_free_torch
+    else:
+        mem_free_total = None
 
     tensor_size = q.shape[0] * q.shape[1] * k.shape[2] * q.element_size()
     mem_required = tensor_size * 2.5
     steps = 1
 
-    if mem_required > mem_free_total:
+    if mem_free_total is not None and mem_required > mem_free_total:
         steps = 2**(math.ceil(math.log(mem_required / mem_free_total, 2)))
 
     slice_size = q.shape[1] // steps if (q.shape[1] % steps) == 0 else q.shape[1]
@@ -179,21 +247,22 @@ def cross_attention_attnblock_forward(self, x):
 
     return h3
 
-def xformers_attnblock_forward(self, x):
-    try:
-        h_ = x
-        h_ = self.norm(h_)
-        q = self.q(h_)
-        k = self.k(h_)
-        v = self.v(h_)
-        b, c, h, w = q.shape
-        q, k, v = map(lambda t: rearrange(t, 'b c h w -> b (h w) c'), (q, k, v))
-        q = q.contiguous()
-        k = k.contiguous()
-        v = v.contiguous()
-        out = xformers.ops.memory_efficient_attention(q, k, v)
-        out = rearrange(out, 'b (h w) c -> b c h w', h=h)
-        out = self.proj_out(out)
-        return x + out
-    except NotImplementedError:
-        return cross_attention_attnblock_forward(self, x)
+
+# def xformers_attnblock_forward(self, x):
+#     try:
+#         h_ = x
+#         h_ = self.norm(h_)
+#         q = self.q(h_)
+#         k = self.k(h_)
+#         v = self.v(h_)
+#         b, c, h, w = q.shape
+#         q, k, v = map(lambda t: rearrange(t, 'b c h w -> b (h w) c'), (q, k, v))
+#         q = q.contiguous()
+#         k = k.contiguous()
+#         v = v.contiguous()
+#         out = xformers.ops.memory_efficient_attention(q, k, v)
+#         out = rearrange(out, 'b (h w) c -> b c h w', h=h)
+#         out = self.proj_out(out)
+#         return x + out
+#     except NotImplementedError:
+#         return cross_attention_attnblock_forward(self, x)
