@@ -8,6 +8,17 @@ from options import DEVICE_HIGH_MEMORY
 from device import Device, CPU_TORCH_DEVICE
 
 
+def _fix_state_dict(d):
+    if "linear.0.weight" in d and "linear.0.bias" in d and "linear.1.weight" in d and "linear.1.bias" in d:
+        return {
+            "linear1.weight": d["linear.0.weight"],
+            "linear1.bias": d["linear.0.bias"],
+            "linear2.weight": d["linear.1.weight"],
+            "linear2.bias": d["linear.1.bias"]
+        }
+    return d
+
+
 class HyperLogic(torch.nn.Module):
     def __init__(self, dim, heads=0):
         super().__init__()
@@ -65,8 +76,8 @@ class HypernetworkDatabase:
         for key in state_dict.keys():
             if isinstance(key, str):  # StableDiffusionWebUI 训练结果兼容处理
                 continue
-            network[key][0].load_state_dict(state_dict[key][0])
-            network[key][1].load_state_dict(state_dict[key][1])
+            network[key][0].load_state_dict(_fix_state_dict(state_dict[key][0]))
+            network[key][1].load_state_dict(_fix_state_dict(state_dict[key][1]))
 
         # 注册
         name = os.path.splitext(os.path.basename(path))[0]
