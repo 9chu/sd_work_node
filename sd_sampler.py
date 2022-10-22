@@ -123,6 +123,16 @@ class VanillaStableDiffusionSampler(StableDiffusionSamplerBase):
             "composition via AND is not supported for DDIM/PLMS samplers"
         cond = tensor
 
+        # for DDIM, shapes must match, we can't just process cond and uncond independently;
+        # filling unconditional_conditioning with repeats of the last vector to match length is
+        # not 100% correct but should work well enough
+        if unconditional_conditioning.shape[1] < cond.shape[1]:
+            last_vector = unconditional_conditioning[:, -1:]
+            last_vector_repeated = last_vector.repeat([1, cond.shape[1] - unconditional_conditioning.shape[1], 1])
+            unconditional_conditioning = torch.hstack([unconditional_conditioning, last_vector_repeated])
+        elif unconditional_conditioning.shape[1] > cond.shape[1]:
+            unconditional_conditioning = unconditional_conditioning[:, :cond.shape[1]]
+
         if self._mask is not None:
             img_orig = self._sampler.model.q_sample(self._init_latent, ts)
             x_dec = img_orig * self._mask + self._nmask * x_dec
